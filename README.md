@@ -17,7 +17,7 @@ FanDeck is UI-only: every fan write in both apps goes through the same
 FixIt product, and is published here because it is generally useful, not because
 anything else depends on it.
 
-**Status: works, feature-complete for v1, dormant.** Last commit 2026-07-24;
+**Status: works, feature-complete for v1, dormant.** Last product change 2026-07-24;
 `release.yaml` declares version 1.0.0. Developed on MacBookPro21,5 (M4 Pro).
 The read path also works on Intel; the Apple-Silicon-specific `Ftst` unlock is a
 no-op there. Not notarized — builds are ad-hoc signed (`CODE_SIGN_IDENTITY: -`),
@@ -77,7 +77,7 @@ sudo fans set F0 const 3500
 | `release.yaml` | `pultik ship` manifest (app id, icon, artifact path) |
 
 **The deep documentation is [`GenesisFanControl/README.md`](GenesisFanControl/README.md)** —
-~950 lines covering the 80-byte `SMCParamStruct` wire protocol, the `Ftst` unlock
+it covers the 80-byte `SMCParamStruct` wire protocol, the `Ftst` unlock
 dance and why release order matters, per-tick re-assertion against
 `thermalmonitord`, the helper's socket protocol and hardening, the concurrency
 model, testing strategy, known limitations and troubleshooting. Read it before
