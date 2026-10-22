@@ -31,11 +31,17 @@ workspace · `docs/specs/` decision log (history).
 
 ## Commands
 
+Prerequisites: macOS 14+ and a Swift 6 toolchain. Xcode Command Line Tools
+suffice for the core, CLI and tests; only **FanDeck.app** needs Xcode.app
+plus Tuist (`brew install tuist`). Bun runs the GenesisFanControl scripts.
+
+Each line runs from the repo root:
+
 ```bash
-cd GenesisFanControl && swift build && swift test   # core + CLI + helper, 329 cases
-cd GenesisFanControl && bun run start               # legacy app + fans CLI, relaunch
-tuist install && tuist generate --no-open           # repo root → GenesisFans.xcworkspace
-./scripts/dist.sh                                   # repo root → dist/FanDeck.zip
+(cd GenesisFanControl && swift build && swift test) # core + CLI + helper, 329 cases
+(cd GenesisFanControl && bun run start)             # legacy app + fans CLI, relaunch
+tuist install && tuist generate --no-open           # → GenesisFans.xcworkspace
+./scripts/dist.sh                                   # → dist/FanDeck.zip
 ```
 
 Also in `GenesisFanControl/`: `bun run test`, `bun run start:debug`, `bun run dev`

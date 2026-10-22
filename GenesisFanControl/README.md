@@ -107,17 +107,19 @@ M4 the SMC accepts that write (`result == 0`) but `thermalmonitord`
 silently undoes it within milliseconds. The fix, cribbed from
 [exelban/stats SMC/smc.swift:566-602](https://github.com/exelban/stats/blob/master/SMC/smc.swift):
 
-1. **Fast path** — write the mode key = 1 and verify by readback. If the
-   fan is already unlocked, this succeeds in microseconds.
+1. **Fast path** — write the mode key = 1, wait 20 ms, verify by readback.
+   An already-unlocked fan succeeds here.
 2. **Read `Ftst`**. If it doesn't exist, give up. If it is already 1,
-   retry the mode write up to 20× and stop there.
+   retry the mode write up to 20× (each 20 ms readback + 50 ms) and stop there.
 3. Otherwise **write `Ftst = 1`**, retrying up to 100× at 50 ms until the
    SMC accepts it (the firmware "unlock fan control" permission).
 4. **Sleep 3 s** so thermalmonitord sees the unlock and yields.
-5. **Retry the mode write up to 300×** at 100 ms; the first few usually fail.
+5. **Retry the mode write up to 300×** (each 20 ms readback + 100 ms); the
+   first few usually fail.
 
-Worst case on the first write: ~3.5 s. Later writes hit the fast path (~1 ms).
-The sequence runs off the main thread (*Concurrency model*).
+The 3 s sleep dominates a typical first write; the retry budgets alone
+allow ~44 s (5 s + 3 s + 36 s) plus SMC I/O before giving up. Later writes
+take the fast path. The sequence runs off the main thread (*Concurrency model*).
 
 **Release direction matters.** To return to auto, write the mode key
 FIRST while `Ftst` is still unlocked, THEN drop `Ftst`:
@@ -224,7 +226,8 @@ These describe the source; they are not runtime- or security-verified claims.
 `HelperConstants.protocolVersion` is bumped on **every** helper-side
 behavior fix (even bug-fix-only). Ping responses carry the helper's
 compiled version; `HelperClient.health()` returns `.healthy`, `.outdated`
-or `.down`, and `AppState.tick` reads it every second. On `.outdated` a
+or `.down`; `AppState.tick` checks it at most every 5 s, skipping ticks
+while a write is in flight. On `.outdated` a
 persistent banner ("Helper is out of date — installed v1, GUI expects v2")
 offers **Update Helper**, which re-runs the admin install. Without it a GUI
 carrying fix X silently drives a helper built before X.
@@ -254,6 +257,11 @@ Ramp configs persist per fan (`SettingsStore.sensorRampConfigs`, JSON in
 UserDefaults). The sheet hydrates from this fan's config, else any
 sibling's; Apply saves it REGARDLESS of the committed mode, so switching
 to constant or auto and back restores the exact ramp.
+
+Both ramp editors (`FanControlSheet`, FanDeck's `RampEditorSheet`) clamp a
+dragged point per axis (0–120 °C; RPM into `[fan.minRPM, fan.maxRPM]`),
+never let it cross a neighbouring point's temperature, and allow deleting
+a point only while more than two remain.
 
 ---
 
@@ -352,6 +360,9 @@ copy; ViewInspector (test-only) covers view structure.
 - Singletons are reset or avoided per test: `LogStore.shared.clear()` in
   setUp/tearDown; `SettingsStore(defaults:)` over UUID-named UserDefaults
   suites; `AppState(smc:autoStartPolling:false)` for AppState tests.
+- Activation policy (`ActivationPolicyDecider`, called by both app
+  delegates): never demote while the main OR Settings window is still
+  visible; `ActivationPolicyTests` assert it.
 - The real `AppleSMCService` is **not** unit-tested — it talks to the kernel.
 - **Not covered by `swift test`:** real on-screen window-surfacing (does
   the gear bring Settings to the front, does the menu-bar click raise the
@@ -371,16 +382,16 @@ idle-watchdog revert, both apps' max-hold, quit and wake handling, `Ftst`
 released only with the last non-auto fan, the helper-held constant (so
 `fans set … const` survives the CLI exiting), `FanControlSheet` reading the
 fan live by `fanID`, `openAtLogin` wired to `SMAppService.mainApp` and the
-menu-bar style/fan/sensor settings re-rendering the menu bar, 5 s socket
+menu-bar style/fan/sensor settings re-rendering the menu bar, the dead
+update-check and language controls removed (`GeneralSettingsTab`), 5 s socket
 timeouts, `shellEscape`d installer paths, drag committing on `onEnded`, and
 a vanished ramp sensor dropping its fan to AUTO.
 
 Still open:
 
 - No code-signing identity check on the socket (*Future work*).
-- CLI-set sensor/ramp modes drift once the CLI exits (host-driven).
-- `checkUpdatesOnLaunch` and `languageCode` have no consumer outside
-  `SettingsStore` (wire each or remove the control).
+- CLI-set sensor/ramp modes are not maintained once the CLI exits
+  (*Troubleshooting*).
 - Not re-checked: multi-click `setMode` race wipes
   `pendingIntent` (per-fan version tokens); per-tick `helperClient.setMode`
   costs a fresh socket + 3 SMC round-trips; `MenuBarIconTab` Picker rows
@@ -441,10 +452,14 @@ target is not in the per-tick re-assertion (*The SMC backend*).
 `HelperConstants.protocolVersion` to force the GUI's `health()` check
 to flag it `.outdated` → banner pops with "Update Helper".
 
-**`fans set F0 sensor ...` (or `ramp`) from the CLI works briefly then
-drifts.** Sensor-based targets are computed per tick by the GUI; the CLI
-process exits immediately. Keep the GUI open or use `fans watch` (which has
-its own RunLoop).
+**`fans set F0 sensor ...` (or `ramp`) from the CLI stops following
+temperature.** The curve lives only in that CLI process, which exits; the
+helper receives just a constant seed (the fan's current target, else its
+minimum), and no
+other process (a running GUI, a later `fans watch`) learns the curve. The
+helper holds that seed as a fixed RPM and reverts the fan to auto after
+60 s without client activity. Configure a temperature ramp in the GUI that
+stays running; persistent CLI curve control is not implemented.
 
 **Tests `testTickAdvancesLastUpdated` / `testTickRefreshesSensors`
 fail.** They assert right after `state.tick()`, but `tick()` dispatches onto
